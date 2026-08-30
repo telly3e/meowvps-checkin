@@ -178,7 +178,8 @@ run_checkin() {
         return 1
     fi
 
-    checked_in="$(jq -r '.checkedIn // empty' "$checkin_body" 2>/dev/null || true)"
+    # 不能使用 `.checkedIn // empty`：jq 会把布尔值 false 当作回退条件。
+    checked_in="$(jq -r 'if .checkedIn == true then "true" elif .checkedIn == false then "false" else empty end' "$checkin_body" 2>/dev/null || true)"
     amount="$(jq -r 'if .amount == null then "" else (.amount | tostring) end' "$checkin_body" 2>/dev/null || true)"
     balance="$(jq -r 'if .balance == null then "未知" else (.balance | tostring) end' "$checkin_body" 2>/dev/null || true)"
     if [[ "$checked_in" != true && "$checked_in" != false ]]; then
