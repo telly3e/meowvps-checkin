@@ -1,0 +1,6 @@
+# Local secrets and runtime artifacts
+*.env
+*.env.*
+*.session
+cookies.txt
+*.log

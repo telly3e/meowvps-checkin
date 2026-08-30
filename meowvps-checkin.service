@@ -1,0 +1,19 @@
+[Unit]
+Description=MeowVPS daily check-in
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=meowvps-checkin
+Group=meowvps-checkin
+WorkingDirectory=/opt/meowvps-checkin
+EnvironmentFile=/etc/meowvps-checkin.env
+Environment=MEOWVPS_LOCK_FILE=/run/meowvps-checkin/checkin.lock
+ExecStart=/opt/meowvps-checkin/meowvps_checkin.sh
+RuntimeDirectory=meowvps-checkin
+RuntimeDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
