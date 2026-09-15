@@ -48,6 +48,25 @@ curl -fsSL https://raw.githubusercontent.com/telly3e/meowvps-checkin/main/instal
   | sudo env MEOWVPS_CHECKIN_TIME=23:30:00 MEOWVPS_TIMEZONE=Asia/Shanghai bash
 ```
 
+## 卸载命令
+```bash
+sudo systemctl disable --now meowvps-checkin.timer
+sudo systemctl stop meowvps-checkin.service 2>/dev/null || true
+
+sudo rm -f /etc/systemd/system/meowvps-checkin.service
+sudo rm -f /etc/systemd/system/meowvps-checkin.timer
+
+sudo systemctl daemon-reload
+sudo systemctl reset-failed
+
+sudo rm -rf /opt/meowvps-checkin
+sudo rm -rf /var/lib/meowvps-checkin
+sudo rm -f /etc/meowvps-checkin.env
+
+sudo userdel meowvps-checkin 2>/dev/null || true
+sudo groupdel meowvps-checkin 2>/dev/null || true
+```
+
 ## 文件说明
 
 - `install.sh`：一键安装入口，适合通过 `curl | sudo bash` 执行。
