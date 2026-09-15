@@ -6,6 +6,7 @@ set -Eeuo pipefail
 umask 077
 
 readonly APP_DIR="/opt/meowvps-checkin"
+readonly STATE_DIR="/var/lib/meowvps-checkin"
 readonly CONFIG_FILE="/etc/meowvps-checkin.env"
 readonly SERVICE_USER="meowvps-checkin"
 readonly SERVICE_GROUP="meowvps-checkin"
@@ -189,7 +190,8 @@ prepare_config() {
         fi
 
         if [[ -n "${MEOWVPS_BASE_URL:-}" ]]; then
-            [[ "${MEOWVPS_BASE_URL}" != *[[:space:]]* ]] || die "MEOWVPS_BASE_URL 不能包含空白字符。"
+            [[ "${MEOWVPS_BASE_URL}" =~ ^https://[^[:space:]]+$ ]] \
+                || die "MEOWVPS_BASE_URL 必须是 HTTPS 地址。"
             printf 'MEOWVPS_BASE_URL=%s\n' "${MEOWVPS_BASE_URL%/}"
         fi
         if [[ -n "${MEOWVPS_TIMEOUT:-}" ]]; then
@@ -197,7 +199,8 @@ prepare_config() {
             printf 'MEOWVPS_TIMEOUT=%s\n' "$MEOWVPS_TIMEOUT"
         fi
         if [[ -n "${TELEGRAM_API_BASE_URL:-}" ]]; then
-            [[ "${TELEGRAM_API_BASE_URL}" != *[[:space:]]* ]] || die "TELEGRAM_API_BASE_URL 不能包含空白字符。"
+            [[ "${TELEGRAM_API_BASE_URL}" =~ ^https://[^[:space:]]+$ ]] \
+                || die "TELEGRAM_API_BASE_URL 必须是 HTTPS 地址。"
             printf 'TELEGRAM_API_BASE_URL=%s\n' "${TELEGRAM_API_BASE_URL%/}"
         fi
         if [[ -n "${TELEGRAM_MESSAGE_THREAD_ID:-}" ]]; then
@@ -224,6 +227,30 @@ ensure_service_account() {
         useradd --system --no-create-home --home-dir /nonexistent \
             --shell "$nologin_shell" --gid "$SERVICE_GROUP" "$SERVICE_USER"
     fi
+}
+
+ensure_state_directory() {
+    local state_file
+
+    ensure_not_symlink "$STATE_DIR"
+    if [[ -e "$STATE_DIR" && ! -d "$STATE_DIR" ]]; then
+        die "状态目录不是目录：$STATE_DIR"
+    fi
+    install -d -o "$SERVICE_USER" -g "$SERVICE_GROUP" -m 0700 "$STATE_DIR" \
+        || die "无法创建会话状态目录：$STATE_DIR"
+
+    for state_file in "$STATE_DIR/cookies.txt" "$STATE_DIR/session-account"; do
+        ensure_not_symlink "$state_file"
+        if [[ -e "$state_file" && ! -f "$state_file" ]]; then
+            die "会话状态文件不是普通文件：$state_file"
+        fi
+        if [[ -e "$state_file" ]]; then
+            chown "$SERVICE_USER:$SERVICE_GROUP" "$state_file" \
+                || die "无法设置会话状态文件所有者：$state_file"
+            chmod 0600 "$state_file" \
+                || die "无法设置会话状态文件权限：$state_file"
+        fi
+    done
 }
 
 download_asset() {
@@ -371,6 +398,8 @@ main() {
 
     [[ "$(head -n 1 "$TEMP_DIR/meowvps_checkin.sh")" == *bash* ]] \
         || die "远端签到脚本内容校验失败。"
+    bash -n "$TEMP_DIR/meowvps_checkin.sh" \
+        || die "远端签到脚本语法校验失败。"
     [[ "$(head -n 1 "$TEMP_DIR/$SERVICE_UNIT")" == "[Unit]" ]] \
         || die "远端 service 文件内容校验失败。"
     [[ "$(head -n 1 "$TEMP_DIR/$TIMER_UNIT")" == "[Unit]" ]] \
@@ -378,6 +407,7 @@ main() {
 
     prepare_timer
     ensure_service_account
+    ensure_state_directory
     capture_systemd_state
     install_files
     enable_timer
@@ -386,6 +416,7 @@ main() {
     log "安装完成。"
     printf '配置文件：%s（仅 root 可读）\n' "$CONFIG_FILE"
     printf '安装目录：%s\n' "$APP_DIR"
+    printf '会话状态：%s（仅签到服务用户可读）\n' "$STATE_DIR"
     printf '定时任务：%s\n' "$TIMER_UNIT"
     printf '\n'
     printf '立即手动签到：sudo systemctl start %s\n' "$SERVICE_UNIT"

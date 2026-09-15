@@ -3,4 +3,7 @@
 *.env.*
 *.session
 cookies.txt
+*.cookie
+*.cookiejar
+session-account
 *.log

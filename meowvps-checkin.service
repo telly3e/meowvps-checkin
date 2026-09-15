@@ -11,8 +11,11 @@ WorkingDirectory=/opt/meowvps-checkin
 EnvironmentFile=/etc/meowvps-checkin.env
 Environment=MEOWVPS_LOCK_FILE=/run/meowvps-checkin/checkin.lock
 ExecStart=/opt/meowvps-checkin/meowvps_checkin.sh
+StateDirectory=meowvps-checkin
+StateDirectoryMode=0700
 RuntimeDirectory=meowvps-checkin
 RuntimeDirectoryMode=0750
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
