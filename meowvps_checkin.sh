@@ -12,6 +12,8 @@ DEFAULT_LOCK_FILE="/tmp/meowvps-checkin.lock"
 DEFAULT_COOKIE_FILE="/var/lib/meowvps-checkin/cookies.txt"
 DEFAULT_SESSION_ACCOUNT_FILE="/var/lib/meowvps-checkin/session-account"
 DEFAULT_TIMEOUT=30
+# 默认只走 IPv4，避免经由 WARP 等不稳定的 IPv6 出口导致超时。
+DEFAULT_IP_VERSION=4
 LAST_ERROR=""
 LAST_HTTP_STATUS=""
 CHECKIN_MESSAGE=""
@@ -448,16 +450,29 @@ if [[ ! "$TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
     exit 1
 fi
 
+IP_VERSION="${MEOWVPS_IP_VERSION:-$DEFAULT_IP_VERSION}"
+case "$IP_VERSION" in
+    4) IP_OPTS=(--ipv4) ;;
+    6) IP_OPTS=(--ipv6) ;;
+    auto) IP_OPTS=() ;;
+    *)
+        echo "签到失败：MEOWVPS_IP_VERSION 只能是 4、6 或 auto。" >&2
+        exit 1
+        ;;
+esac
+
 CURL_OPTS=(
     --silent --show-error --location
     --connect-timeout 10 --max-time "$TIMEOUT"
     --retry 2 --retry-delay 2
+    "${IP_OPTS[@]}"
     --proto '=https' --proto-redir '=https'
     --user-agent 'meowvps-checkin/1.0 (bash)'
 )
 CURL_NO_RETRY_OPTS=(
     --silent --show-error --location
     --connect-timeout 10 --max-time "$TIMEOUT"
+    "${IP_OPTS[@]}"
     --proto '=https' --proto-redir '=https'
     --user-agent 'meowvps-checkin/1.0 (bash)'
 )

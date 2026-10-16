@@ -48,6 +48,14 @@ curl -fsSL https://raw.githubusercontent.com/telly3e/meowvps-checkin/main/instal
   | sudo env MEOWVPS_CHECKIN_TIME=23:30:00 MEOWVPS_TIMEZONE=Asia/Shanghai bash
 ```
 
+## 网络出口（IPv4 / IPv6）
+
+脚本默认强制使用 IPv4 访问 MeowVPS 和 Telegram（`curl --ipv4`），避免 VPS 上的 WARP 等 IPv6 出口不稳定时请求超时。如需改回其他行为，在 `/etc/meowvps-checkin.env` 中加入：
+
+```bash
+MEOWVPS_IP_VERSION=auto   # 4（默认）、6 或 auto（由 curl 自动选择）
+```
+
 ## 卸载命令
 ```bash
 sudo systemctl disable --now meowvps-checkin.timer

@@ -198,6 +198,11 @@ prepare_config() {
             [[ "${MEOWVPS_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "MEOWVPS_TIMEOUT 必须是正整数。"
             printf 'MEOWVPS_TIMEOUT=%s\n' "$MEOWVPS_TIMEOUT"
         fi
+        if [[ -n "${MEOWVPS_IP_VERSION:-}" ]]; then
+            [[ "${MEOWVPS_IP_VERSION}" =~ ^(4|6|auto)$ ]] \
+                || die "MEOWVPS_IP_VERSION 只能是 4、6 或 auto。"
+            printf 'MEOWVPS_IP_VERSION=%s\n' "$MEOWVPS_IP_VERSION"
+        fi
         if [[ -n "${TELEGRAM_API_BASE_URL:-}" ]]; then
             [[ "${TELEGRAM_API_BASE_URL}" =~ ^https://[^[:space:]]+$ ]] \
                 || die "TELEGRAM_API_BASE_URL 必须是 HTTPS 地址。"
