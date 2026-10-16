@@ -56,6 +56,19 @@ curl -fsSL https://raw.githubusercontent.com/telly3e/meowvps-checkin/main/instal
 MEOWVPS_IP_VERSION=auto   # 4（默认）、6 或 auto（由 curl 自动选择）
 ```
 
+## 失败重试
+
+- 遇到网络超时、HTTP 5xx 或 429 这类临时错误时，脚本会每隔 600 秒重新完整执行一次签到，最多重试 3 次；用户名或密码错误等非临时错误不会重试。只有最终结果才会推送 Telegram，重试期间不会重复通知。
+- Telegram 推送只在请求确定没有发出（DNS、连接或 TLS 阶段失败）时重试，每隔 10 秒、最多 3 次，避免收到重复消息。
+- 重试期间服务保持运行并持有运行锁，此时手动执行会提示“已有一个签到任务正在运行”。
+
+可在 `/etc/meowvps-checkin.env` 中调整：
+
+```bash
+MEOWVPS_RETRY_COUNT=3     # 最多重试次数，0 表示不重试
+MEOWVPS_RETRY_DELAY=600   # 每次重试前等待的秒数
+```
+
 ## 卸载命令
 ```bash
 sudo systemctl disable --now meowvps-checkin.timer

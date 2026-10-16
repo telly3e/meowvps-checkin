@@ -14,8 +14,15 @@ DEFAULT_SESSION_ACCOUNT_FILE="/var/lib/meowvps-checkin/session-account"
 DEFAULT_TIMEOUT=30
 # 默认只走 IPv4，避免经由 WARP 等不稳定的 IPv6 出口导致超时。
 DEFAULT_IP_VERSION=4
+# 网络类失败（超时、5xx、429）时整体重试的次数与间隔（秒）。
+DEFAULT_RETRY_COUNT=3
+DEFAULT_RETRY_DELAY=600
+TELEGRAM_ATTEMPTS=3
+TELEGRAM_RETRY_DELAY=10
 LAST_ERROR=""
 LAST_HTTP_STATUS=""
+LAST_ERROR_TRANSIENT=false
+LAST_REQUEST_SENT=false
 CHECKIN_MESSAGE=""
 COOKIE_FILE=""
 SESSION_ACCOUNT_FILE=""
@@ -24,6 +31,7 @@ CURL_NO_RETRY_OPTS=()
 
 fail() {
     LAST_ERROR="$1"
+    LAST_ERROR_TRANSIENT=false
     return 1
 }
 
@@ -32,6 +40,13 @@ load_env_file() {
     local line key value
 
     [[ -f "$filename" ]] || return 0
+    if [[ ! -r "$filename" ]]; then
+        # systemd 已通过 EnvironmentFile 注入配置时，服务用户读不到 root-only 文件是正常的。
+        if [[ -z "${MEOWVPS_USERNAME:-}${MEOWVPS_USERNAME_B64:-}" ]]; then
+            echo "警告：无权读取配置文件 $filename，请使用 sudo systemctl start meowvps-checkin.service 运行。" >&2
+        fi
+        return 0
+    fi
 
     # 只读取简单的 KEY=VALUE，不执行配置文件中的命令。
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -109,7 +124,7 @@ api_error_detail() {
 http_json() {
     local output="$1"
     shift
-    local status
+    local status write_out request_bytes
     local -a curl_options
 
     curl_options=("${CURL_OPTS[@]}")
@@ -119,10 +134,19 @@ http_json() {
     fi
 
     LAST_HTTP_STATUS=""
-    if ! status="$(curl "${curl_options[@]}" -o "$output" -w '%{http_code}' "$@")"; then
+    LAST_REQUEST_SENT=false
+    if ! write_out="$(curl "${curl_options[@]}" -o "$output" -w '%{http_code} %{size_request}' "$@")"; then
+        request_bytes="${write_out##* }"
+        # 请求字节数为 0 说明请求从未发出（DNS、连接或 TLS 阶段失败），重试不会造成重复提交。
+        if [[ "$request_bytes" =~ ^[0-9]+$ ]] && (( request_bytes > 0 )); then
+            LAST_REQUEST_SENT=true
+        fi
         fail "网络请求失败（curl）"
+        LAST_ERROR_TRANSIENT=true
         return 1
     fi
+    LAST_REQUEST_SENT=true
+    status="${write_out%% *}"
     LAST_HTTP_STATUS="$status"
     if [[ ! "$status" =~ ^[0-9]{3}$ ]]; then
         fail "网络请求未返回有效 HTTP 状态码"
@@ -130,6 +154,9 @@ http_json() {
     fi
     if (( 10#$status < 200 || 10#$status >= 300 )); then
         fail "$(api_error_detail "$output" "$status")"
+        if (( 10#$status >= 500 || 10#$status == 429 )); then
+            LAST_ERROR_TRANSIENT=true
+        fi
         return 1
     fi
     return 0
@@ -350,7 +377,7 @@ telegram_send() {
     local message="$1"
     local token="${TELEGRAM_BOT_TOKEN:-}"
     local chat_id="${TELEGRAM_CHAT_ID:-}"
-    local api_base thread_id payload telegram_body telegram_payload_file telegram_url_file ok description
+    local api_base thread_id payload telegram_body telegram_payload_file telegram_url_file ok description attempt
 
     if [[ -z "$token" && -z "$chat_id" ]]; then
         echo "未配置 Telegram，跳过通知。"
@@ -394,14 +421,22 @@ telegram_send() {
         fail "无法准备 Telegram 请求文件"
         return 1
     fi
-    if ! http_json "$telegram_body" --no-retry \
+    # 只在请求确定没有发出时重试，避免 Telegram 收到重复消息。
+    attempt=1
+    while ! http_json "$telegram_body" --no-retry \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
         --data-binary "@$telegram_payload_file" \
-        --config "$telegram_url_file"; then
+        --config "$telegram_url_file"; do
+        if [[ "$LAST_REQUEST_SENT" == false ]] && (( attempt < TELEGRAM_ATTEMPTS )); then
+            echo "Telegram 连接失败，${TELEGRAM_RETRY_DELAY} 秒后重试（第 $attempt/$TELEGRAM_ATTEMPTS 次）。" >&2
+            sleep "$TELEGRAM_RETRY_DELAY"
+            attempt=$((attempt + 1))
+            continue
+        fi
         LAST_ERROR="Telegram 推送失败：$LAST_ERROR"
         return 1
-    fi
+    done
     ok="$(jq -r '.ok // false' "$telegram_body" 2>/dev/null || true)"
     if [[ "$ok" != true ]]; then
         description="$(jq -r '.description // "接口返回格式异常"' "$telegram_body" 2>/dev/null || true)"
@@ -447,6 +482,18 @@ fi
 TIMEOUT="${MEOWVPS_TIMEOUT:-$DEFAULT_TIMEOUT}"
 if [[ ! "$TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
     echo "签到失败：MEOWVPS_TIMEOUT 必须是正整数。" >&2
+    exit 1
+fi
+
+RETRY_COUNT="${MEOWVPS_RETRY_COUNT:-$DEFAULT_RETRY_COUNT}"
+if [[ ! "$RETRY_COUNT" =~ ^[0-9]+$ ]]; then
+    echo "签到失败：MEOWVPS_RETRY_COUNT 必须是非负整数。" >&2
+    exit 1
+fi
+RETRY_COUNT=$((10#$RETRY_COUNT))
+RETRY_DELAY="${MEOWVPS_RETRY_DELAY:-$DEFAULT_RETRY_DELAY}"
+if [[ ! "$RETRY_DELAY" =~ ^[0-9]+$ ]]; then
+    echo "签到失败：MEOWVPS_RETRY_DELAY 必须是非负整数（秒）。" >&2
     exit 1
 fi
 
@@ -505,14 +552,24 @@ else
     echo "警告：未找到 flock，将不启用重复运行锁。" >&2
 fi
 
-if ! run_checkin; then
+attempt=1
+while ! run_checkin; do
+    if [[ "$LAST_ERROR_TRANSIENT" == true ]] && (( attempt <= RETRY_COUNT )); then
+        echo "签到失败：$LAST_ERROR；${RETRY_DELAY} 秒后重试（第 $attempt/$RETRY_COUNT 次重试）。" >&2
+        sleep "$RETRY_DELAY"
+        attempt=$((attempt + 1))
+        continue
+    fi
+    if (( attempt > 1 )); then
+        LAST_ERROR="$LAST_ERROR（已重试 $((attempt - 1)) 次）"
+    fi
     echo "签到失败：$LAST_ERROR" >&2
     failure_message="$(printf 'MeowVPS 签到失败\n原因：%s' "$LAST_ERROR")"
     if ! telegram_send "$failure_message"; then
         echo "Telegram 错误通知失败：$LAST_ERROR" >&2
     fi
     exit 1
-fi
+done
 
 printf '%s\n' "$CHECKIN_MESSAGE"
 if ! telegram_send "$CHECKIN_MESSAGE"; then

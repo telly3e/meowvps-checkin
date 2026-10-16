@@ -198,6 +198,14 @@ prepare_config() {
             [[ "${MEOWVPS_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "MEOWVPS_TIMEOUT 必须是正整数。"
             printf 'MEOWVPS_TIMEOUT=%s\n' "$MEOWVPS_TIMEOUT"
         fi
+        if [[ -n "${MEOWVPS_RETRY_COUNT:-}" ]]; then
+            [[ "${MEOWVPS_RETRY_COUNT}" =~ ^[0-9]+$ ]] || die "MEOWVPS_RETRY_COUNT 必须是非负整数。"
+            printf 'MEOWVPS_RETRY_COUNT=%s\n' "$MEOWVPS_RETRY_COUNT"
+        fi
+        if [[ -n "${MEOWVPS_RETRY_DELAY:-}" ]]; then
+            [[ "${MEOWVPS_RETRY_DELAY}" =~ ^[0-9]+$ ]] || die "MEOWVPS_RETRY_DELAY 必须是非负整数（秒）。"
+            printf 'MEOWVPS_RETRY_DELAY=%s\n' "$MEOWVPS_RETRY_DELAY"
+        fi
         if [[ -n "${MEOWVPS_IP_VERSION:-}" ]]; then
             [[ "${MEOWVPS_IP_VERSION}" =~ ^(4|6|auto)$ ]] \
                 || die "MEOWVPS_IP_VERSION 只能是 4、6 或 auto。"
