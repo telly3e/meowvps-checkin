@@ -253,7 +253,7 @@ run_checkin() {
     local base_url="${MEOWVPS_BASE_URL:-$DEFAULT_BASE_URL}"
     local username password login_request username_file password_file
     local login_body me_body checkin_body
-    local authenticated checked_in amount balance
+    local authenticated checked_in awarded amount balance checkin_balance checkin_days drop_line
 
     base_url="${base_url%/}"
     if [[ ! "$base_url" =~ ^https://[^[:space:]]+$ ]]; then
@@ -356,20 +356,35 @@ run_checkin() {
 
     # 不能使用 `.checkedIn // empty`：jq 会把布尔值 false 当作回退条件。
     checked_in="$(jq -r 'if .checkedIn == true then "true" elif .checkedIn == false then "false" else empty end' "$checkin_body" 2>/dev/null || true)"
+    # 新版接口用 awarded 标记是否掉落猫币；旧版没有该字段时按 amount 是否大于 0 判断。
+    awarded="$(jq -r 'if .awarded == true then "true" elif .awarded == false then "false"
+        elif ((.amount | type) == "number" and .amount > 0) then "true" else "false" end' "$checkin_body" 2>/dev/null || true)"
     amount="$(jq -r 'if .amount == null then "" else (.amount | tostring) end' "$checkin_body" 2>/dev/null || true)"
     balance="$(jq -r 'if .balance == null then "未知" else (.balance | tostring) end' "$checkin_body" 2>/dev/null || true)"
+    checkin_balance="$(jq -r 'if .checkinBalance == null then "未知" else (.checkinBalance | tostring) end' "$checkin_body" 2>/dev/null || true)"
+    checkin_days="$(jq -r 'if .checkinDays == null then "未知" else (.checkinDays | tostring) + " 天" end' "$checkin_body" 2>/dev/null || true)"
     if [[ "$checked_in" != true && "$checked_in" != false ]]; then
         fail "签到接口返回格式异常：缺少 checkedIn"
         return 1
     fi
 
     if [[ "$checked_in" == false ]]; then
-        CHECKIN_MESSAGE="$(printf '🐱MeowVPS 今日已经签到\n当前余额：%s 猫币' "$balance")"
-    elif [[ -n "$amount" ]] && [[ ! "$amount" =~ ^0+([.]0+)?$ ]]; then
-        CHECKIN_MESSAGE="$(printf '🐱MeowVPS 签到成功\n本次获得：+%s 猫币\n当前余额：%s 猫币' "$amount" "$balance")"
-    else
-        CHECKIN_MESSAGE="$(printf '🐱MeowVPS 今日已经签到\n当前余额：%s 猫币' "$balance")"
+        CHECKIN_MESSAGE="$(printf '🐱MeowVPS 今日已经签到\n当前猫币：%s\n当前签到数：%s\n累计签到：%s' \
+            "$balance" "$checkin_balance" "$checkin_days")"
+        return 0
     fi
+
+    if [[ "$awarded" == true ]]; then
+        if [[ -n "$amount" && ! "$amount" =~ ^0+([.]0+)?$ ]]; then
+            drop_line="🎉 掉落猫币：+$amount"
+        else
+            drop_line="🎉 掉落了猫币"
+        fi
+    else
+        drop_line="本次未掉落猫币"
+    fi
+    CHECKIN_MESSAGE="$(printf '🐱MeowVPS 签到成功\n%s\n当前猫币：%s\n当前签到数：%s\n累计签到：%s' \
+        "$drop_line" "$balance" "$checkin_balance" "$checkin_days")"
     return 0
 }
 
