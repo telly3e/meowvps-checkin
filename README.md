@@ -2,7 +2,7 @@
 
 这是一个无 Python 依赖的 MeowVPS 每日签到脚本，使用 `bash`、`curl` 和 `jq` 完成登录、会话校验与签到，并通过 systemd timer 定时运行。脚本会持久化自己的登录 Cookie，在会话仍然有效时跳过登录，避免每天创建新的后台会话。Telegram Bot 通知是可选项。
 
-## 一键安装
+## 一键安装 / 更新
 
 目标机器需要使用 systemd（例如 Debian 12、Ubuntu Server）。在目标 VPS 上执行：
 
@@ -13,6 +13,8 @@ curl -fsSL https://raw.githubusercontent.com/telly3e/meowvps-checkin/main/instal
 首次安装时，安装器会从当前终端读取 MeowVPS 用户名和密码，并询问是否配置 Telegram Bot 通知。账号信息会写入 `/etc/meowvps-checkin.env`，文件权限为 `0600`；其中的凭据是 base64 编码，不是加密，因此不要降低文件权限或把它提交到 Git。
 
 安装器会自动安装缺少的 `curl`、`jq`、`coreutils`、`util-linux` 等依赖，创建无登录权限的 `meowvps-checkin` 系统用户，并启用每日 09:00（`Asia/Shanghai`）运行的 timer。会话状态保存在 `/var/lib/meowvps-checkin/`，重新运行安装器更新脚本时会保留该目录。
+
+更新时会保留之前的配置，无需重新配置
 
 ## 常用操作
 
