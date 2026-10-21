@@ -356,9 +356,9 @@ run_checkin() {
 
     # 不能使用 `.checkedIn // empty`：jq 会把布尔值 false 当作回退条件。
     checked_in="$(jq -r 'if .checkedIn == true then "true" elif .checkedIn == false then "false" else empty end' "$checkin_body" 2>/dev/null || true)"
-    # 新版接口用 awarded 标记是否掉落猫币；旧版没有该字段时按 amount 是否大于 0 判断。
-    awarded="$(jq -r 'if .awarded == true then "true" elif .awarded == false then "false"
-        elif ((.amount | type) == "number" and .amount > 0) then "true" else "false" end' "$checkin_body" 2>/dev/null || true)"
+    # 新版接口中 checkedIn 表示“今天已签到”的状态，awarded 表示本次请求是否发放了签到奖励
+    # （已签到后再次请求返回 checkedIn=true、awarded=false）；是否掉落猫币只看 amount。
+    awarded="$(jq -r 'if .awarded == true then "true" elif .awarded == false then "false" else "" end' "$checkin_body" 2>/dev/null || true)"
     amount="$(jq -r 'if .amount == null then "" else (.amount | tostring) end' "$checkin_body" 2>/dev/null || true)"
     balance="$(jq -r 'if .balance == null then "未知" else (.balance | tostring) end' "$checkin_body" 2>/dev/null || true)"
     checkin_balance="$(jq -r 'if .checkinBalance == null then "未知" else (.checkinBalance | tostring) end' "$checkin_body" 2>/dev/null || true)"
@@ -368,18 +368,17 @@ run_checkin() {
         return 1
     fi
 
-    if [[ "$checked_in" == false ]]; then
+    # 便于排查接口格式变化；返回中只有签到状态与数值，不含凭据。
+    echo "签到接口返回：$(jq -c . "$checkin_body" 2>/dev/null || true)"
+
+    if [[ "$checked_in" == false || "$awarded" == false ]]; then
         CHECKIN_MESSAGE="$(printf '🐱MeowVPS 今日已经签到\n当前猫币：%s\n当前签到数：%s\n累计签到：%s' \
             "$balance" "$checkin_balance" "$checkin_days")"
         return 0
     fi
 
-    if [[ "$awarded" == true ]]; then
-        if [[ -n "$amount" && ! "$amount" =~ ^0+([.]0+)?$ ]]; then
-            drop_line="🎉 掉落猫币：+$amount"
-        else
-            drop_line="🎉 掉落了猫币"
-        fi
+    if [[ "$amount" =~ ^[0-9]+([.][0-9]+)?$ && ! "$amount" =~ ^0+([.]0+)?$ ]]; then
+        drop_line="🎉 掉落猫币：+$amount"
     else
         drop_line="本次未掉落猫币"
     fi
